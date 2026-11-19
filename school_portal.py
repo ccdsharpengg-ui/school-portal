@@ -763,20 +763,42 @@ SHIM_JS = r"""// Gives the page the same small database API it used on claude.ai
   };
 
   addEventListener('DOMContentLoaded', () => {
+    // Admin sign-in uses a password box on the page, not a browser pop-up:
+    // pop-ups are blocked in home-screen apps, in-app browsers and some phones.
+    const header = document.querySelector('header');
     const b = document.createElement('button');
     b.className = 'lk';
     b.textContent = token() ? 'Admin sign-out' : 'Admin sign-in';
-    b.onclick = async () => {
-      if (token()) localStorage.removeItem('adm');
-      else {
-        const password = prompt('Admin password');
-        if (!password) return;
-        try { localStorage.setItem('adm', (await call('POST', '/login', { password })).token); }
-        catch (e) { alert('Wrong password'); return; }
-      }
-      location.reload();
+    const form = document.createElement('form');
+    form.className = 'card';
+    form.hidden = true;
+    form.innerHTML = '<h3>School admin sign-in</h3>'
+      + '<div class="rw l" style="margin-top:10px"><input id="admpw" type="password" placeholder="Admin password" autocomplete="current-password">'
+      + '<button class="btn" type="submit">Sign in</button><button class="lk" type="button" id="admcancel">Cancel</button></div>'
+      + '<small id="admerr" role="alert"></small>';
+    b.onclick = () => {
+      if (token()) { localStorage.removeItem('adm'); location.reload(); return; }
+      form.hidden = !form.hidden;
+      if (!form.hidden) form.querySelector('#admpw').focus();
     };
-    document.querySelector('header').appendChild(b);
+    form.onsubmit = async e => {
+      e.preventDefault();
+      const pw = form.querySelector('#admpw').value, err = form.querySelector('#admerr');
+      if (!pw) { err.textContent = 'Enter the admin password.'; return; }
+      err.textContent = 'Checking…';
+      try {
+        localStorage.setItem('adm', (await call('POST', '/login', { password: pw })).token);
+        // Go straight to the admin screen after signing in.
+        try { await call('PATCH', '/c/' + encodeURIComponent('data/users/' + uid) + '/me', { role: 'admin' }); } catch (x) {}
+        location.reload();
+      } catch (x) {
+        err.textContent = x.message === 'Wrong password' ? 'Wrong password. Try again.' : x.message;
+        form.querySelector('#admpw').select();
+      }
+    };
+    form.querySelector('#admcancel').onclick = () => { form.hidden = true; form.querySelector('#admerr').textContent = ''; };
+    header.appendChild(b);
+    header.appendChild(form);
     check().then(() => { b.textContent = token() ? 'Admin sign-out' : 'Admin sign-in'; });
   });
   if ('serviceWorker' in navigator) navigator.serviceWorker.register('/sw.js').catch(() => {});
@@ -800,4 +822,3 @@ if __name__ == "__main__":
         server.serve_forever()
     except KeyboardInterrupt:
         print("Stopped.")
-
